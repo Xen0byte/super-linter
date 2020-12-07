@@ -21,6 +21,9 @@ function BuildFileList() {
   TEST_CASE_RUN="${2}"
   debug "TEST_CASE_RUN: ${TEST_CASE_RUN}..."
 
+  ANSIBLE_DIRECTORY="${3}"
+  debug "ANSIBLE_DIRECTORY: ${ANSIBLE_DIRECTORY}..."
+
   if [ "${VALIDATE_ALL_CODEBASE}" == "false" ] && [ "${TEST_CASE_RUN}" != "true" ]; then
     # Need to build a list of all files changed
     # This can be pulled from the GITHUB_EVENT_PATH payload
@@ -61,12 +64,30 @@ function BuildFileList() {
       # print header #
       ################
       debug "----------------------------------------------"
-      debug "Generating Diff with:[git diff-tree --no-commit-id --name-only -r \"${GITHUB_SHA}]\""
+      debug "Generating Diff with:[git diff-tree --no-commit-id --name-only -r \"${GITHUB_SHA}\"]"
 
       #################################################
       # Get the Array of files changed in the commits #
       #################################################
       mapfile -t RAW_FILE_ARRAY < <(git diff-tree --no-commit-id --name-only -r "${GITHUB_SHA}" 2>&1)
+
+      ###############################################################
+      # Need to see if the array is empty, if so, try the other way #
+      ###############################################################
+      if [ ${#RAW_FILE_ARRAY[@]} -eq 0 ]; then
+        # Empty array, going to try to pull from main branch differences
+        ################
+        # print header #
+        ################
+        debug "----------------------------------------------"
+        debug "WARN: Generation of File array with diff-tree produced [0] items, trying with git diff..."
+        debug "Generating Diff with:[git diff --name-only '${DEFAULT_BRANCH}...${GITHUB_SHA}' --diff-filter=d]"
+
+        #################################################
+        # Get the Array of files changed in the commits #
+        #################################################
+        mapfile -t RAW_FILE_ARRAY < <(git -C "${GITHUB_WORKSPACE}" diff --name-only "${DEFAULT_BRANCH}...${GITHUB_SHA}" --diff-filter=d 2>&1)
+      fi
     else
       ################
       # PR event     #
@@ -328,6 +349,16 @@ function BuildFileList() {
       # Append the file to the array #
       ################################
       FILE_ARRAY_JSON+=("${FILE}")
+
+      ############################
+      # Check if file is Ansible #
+      ############################
+      if DetectAnsibleFile "${ANSIBLE_DIRECTORY}" "${FILE}"; then
+        ################################
+        # Append the file to the array #
+        ################################
+        FILE_ARRAY_ANSIBLE+=("${FILE}")
+      fi
       ############################
       # Check if file is OpenAPI #
       ############################
@@ -568,6 +599,20 @@ function BuildFileList() {
       # Append the file to the array #
       ################################
       FILE_ARRAY_YAML+=("${FILE}")
+
+      ############################
+      # Check if file is Ansible #
+      ############################
+      if [ -d "${ANSIBLE_DIRECTORY}" ]; then
+        if DetectAnsibleFile "${ANSIBLE_DIRECTORY}" "${FILE}"; then
+          ################################
+          # Append the file to the array #
+          ################################
+          FILE_ARRAY_ANSIBLE+=("${FILE}")
+        fi
+      else
+        debug "ANSIBLE_DIRECTORY (${ANSIBLE_DIRECTORY}) does NOT exist."
+      fi
 
       #####################################
       # Check if the file is CFN template #
